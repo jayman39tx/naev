@@ -75,11 +75,12 @@ static int dsys_compJump( const void *jmp1, const void *jmp2 )
  */
 int dsys_saveSystem( StarSystem *sys )
 {
-   int i;
+   int i, j;
    xmlDocPtr doc;
    xmlTextWriterPtr writer;
    const Planet **sorted_planets;
    const JumpPoint **sorted_jumps, *jp;
+   const AsteroidAnchor *ast;
    char file[PATH_MAX], *cleanName;
 
    /* Reconstruct jumps so jump pos are updated. */
@@ -88,7 +89,7 @@ int dsys_saveSystem( StarSystem *sys )
    /* Create the writer. */
    writer = xmlNewTextWriterDoc(&doc, 0);
    if (writer == NULL) {
-      WARN("testXmlwriterDoc: Error creating the xml writer");
+      WARN(_("testXmlwriterDoc: Error creating the xml writer"));
       return -1;
    }
 
@@ -164,6 +165,28 @@ int dsys_saveSystem( StarSystem *sys )
    xmlw_endElem( writer ); /* "jumps" */
    free(sorted_jumps);
 
+   /* Asteroids. */
+   if (sys->nasteroids > 0) {
+      xmlw_startElem( writer, "asteroids" );
+      for (i=0; i<sys->nasteroids; i++) {
+         ast = &sys->asteroids[i];
+         xmlw_startElem( writer, "asteroid" );
+
+         /* Corners */
+         for (j=0; j<ast->ncorners; j++) {
+            xmlw_startElem( writer, "corner" );
+            xmlw_elem( writer, "x", "%f", ast->corners[j].x );
+            xmlw_elem( writer, "y", "%f", ast->corners[j].y );
+            xmlw_endElem( writer ); /* "corner" */
+         }
+
+         /* Misc. properties. */
+         xmlw_elem( writer, "density", "%f", ast->density );
+         xmlw_endElem( writer ); /* "asteroid" */
+      }
+      xmlw_endElem( writer ); /* "asteroids" */
+   }
+
    xmlw_endElem( writer ); /** "ssys" */
    xmlw_done(writer);
 
@@ -207,18 +230,18 @@ int dsys_saveAll (void)
  *
  *    @return 0 on success.
  */
-int dsys_saveMap (StarSystem **uniedit_sys, int uniedit_nsys)
+int dsys_saveMap (StarSystem **uniedit_sys, int uniedit_nsys, char *fileName, char *mapName, char *mapDescription)
 {
-   int i, j, k;
+   int i, j, k, len;
    xmlDocPtr doc;
    xmlTextWriterPtr writer;
    StarSystem *s;
-   char file[PATH_MAX], *cleanName;
+   char *file, *cleanName;
 
    /* Create the writer. */
    writer = xmlNewTextWriterDoc(&doc, 0);
    if (writer == NULL) {
-      WARN("testXmlwriterDoc: Error creating the xml writer");
+      WARN(_("testXmlwriterDoc: Error creating the xml writer"));
       return -1;
    }
 
@@ -230,13 +253,13 @@ int dsys_saveMap (StarSystem **uniedit_sys, int uniedit_nsys)
    xmlw_startElem( writer, "outfit" );
 
    /* Attributes. */
-   xmlw_attr( writer, "name", "Editor-generated Map" );
+   xmlw_attr( writer, "name", "%s", mapName );
 
    /* General. */
    xmlw_startElem( writer, "general" );
    xmlw_elem( writer, "mass", "%d", 0 );
    xmlw_elem( writer, "price", "%d", 1000 );
-   xmlw_elem( writer, "description", "%s", "This map has been created by the universe editor." );
+   xmlw_elem( writer, "description", "%s", mapDescription );
    xmlw_elem( writer, "gfx_store", "%s", "map" );
    xmlw_endElem( writer ); /* "general" */
 
@@ -282,9 +305,18 @@ int dsys_saveMap (StarSystem **uniedit_sys, int uniedit_nsys)
    xmlFreeTextWriter(writer);
 
    /* Write data. */
-   cleanName = uniedit_nameFilter( "saved map" );
-   nsnprintf( file, sizeof(file), "%s/%s.xml", conf.dev_save_map, cleanName );
+   cleanName = uniedit_nameFilter( fileName );
+
+   /* DEBUG */
+   WARN("\tcleanName       : \"%s\"", cleanName);
+
+   len       = (strlen(cleanName)+22);
+   file      = malloc( len );
+   nsnprintf( file, len, "dat/outfits/maps/%s.xml", cleanName );
+
+   /* Actually write data */
    xmlSaveFileEnc( file, doc, "UTF-8" );
+   free( file );
 
    /* Clean up. */
    xmlFreeDoc(doc);

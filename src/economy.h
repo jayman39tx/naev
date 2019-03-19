@@ -9,6 +9,7 @@
 
 
 #include <stdint.h>
+#include "opengl.h"
 
 
 #define ECON_CRED_STRLEN      32 /**< Maximum length a credits2str string can reach. */
@@ -31,7 +32,23 @@ typedef struct Commodity_ {
    char* description; /**< Description of the commodity. */
    /* Prices. */
    double price; /**< Base price of the commodity. */
+   glTexture* gfx_store; /**< Store graphic. */
+   glTexture* gfx_space; /**< Space graphic. */
 } Commodity;
+
+
+/**
+ * @struct Gatherable
+ *
+ * @brief Represents stuff that can be gathered.
+ */
+typedef struct Gatherable_ {
+   Commodity *type; /**< Type of commodity. */
+   Vector2d pos; /**< Position. */
+   Vector2d vel; /**< Velocity. */
+   double timer; /**< Timer to de-spawn the gatherable. */
+   double lifeleng; /**< nb of seconds before de-spawn. */
+} Gatherable;
 
 
 /*
@@ -52,6 +69,18 @@ int economy_execQueued (void);
 int economy_update( unsigned int dt );
 int economy_refresh (void);
 void economy_destroy (void);
+
+
+/*
+ * Gatherable objects
+ */
+void gatherable_init( Commodity* com, Vector2d pos, Vector2d vel );
+void gatherable_render( void );
+int gatherable_getClosest( Vector2d pos, double rad );
+int gatherable_getPos( Vector2d* pos, Vector2d* vel, int id );
+void gatherable_free( void );
+void gatherable_update( double dt );
+void gatherable_gather( int pilot );
 
 
 /*

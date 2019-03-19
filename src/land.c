@@ -20,11 +20,13 @@
 
 #include "land_outfits.h"
 #include "land_shipyard.h"
+#include "land_trade.h"
 
 #include "log.h"
 #include "toolkit.h"
 #include "dialogue.h"
 #include "player.h"
+#include "player_autonav.h"
 #include "rng.h"
 #include "music.h"
 #include "economy.h"
@@ -76,19 +78,9 @@ unsigned int land_generated = 0;
  * land variables
  */
 int landed = 0; /**< Is player landed. */
-static int land_takeoff = 0; /**< Takeoff. */
 int land_loaded = 0; /**< Finished loading? */
 unsigned int land_wid = 0; /**< Land window ID, also used in gui.c */
 static int land_regen = 0; /**< Whether or not regenning. */
-static const char *land_windowNames[LAND_NUMWINDOWS] = {
-   "Landing Main",
-   "Spaceport Bar",
-   "Missions",
-   "Outfits",
-   "Shipyard",
-   "Equipment",
-   "Commodity"
-};
 static int land_windowsMap[LAND_NUMWINDOWS]; /**< Mapping of windows. */
 static unsigned int *land_windows = NULL; /**< Landed window ids. */
 Planet* land_planet = NULL; /**< Planet player landed at. */
@@ -109,7 +101,6 @@ static glTexture *mission_portrait = NULL; /**< Mission portrait. */
  * player stuff
  */
 static int last_window = 0; /**< Default window. */
-static int commodity_mod = 10;
 
 
 /*
@@ -124,7 +115,7 @@ static char *errorlist_ptr;
 /*
  * Rescue.
  */
-static lua_State *rescue_L = NULL; /**< Rescue Lua state. */
+static nlua_env rescue_env = LUA_NOREF; /**< Rescue Lua env. */
 static void land_stranded (void);
 
 
@@ -134,15 +125,6 @@ static void land_stranded (void);
 static void land_createMainTab( unsigned int wid );
 static void land_cleanupWindow( unsigned int wid, char *name );
 static void land_changeTab( unsigned int wid, char *wgt, int old, int tab );
-/* commodity exchange */
-static void commodity_exchange_open( unsigned int wid );
-static void commodity_update( unsigned int wid, char* str );
-static void commodity_buy( unsigned int wid, char* str );
-static void commodity_sell( unsigned int wid, char* str );
-static int commodity_canBuy( char *name );
-static int commodity_canSell( char *name );
-static int commodity_getMod (void);
-static void commodity_renderMod( double bx, double by, double w, double h, void *data );
 /* spaceport bar */
 static void bar_getDim( int wid,
       int *w, int *h, int *iw, int *ih, int *bw, int *bh );
@@ -181,283 +163,6 @@ int land_doneLoading (void)
 
 
 /**
- * @brief Opens the local market window.
- */
-static void commodity_exchange_open( unsigned int wid )
-{
-   int i, ngoods;
-   char **goods;
-   int w, h;
-
-   /* Mark as generated. */
-   land_tabGenerate(LAND_WINDOW_COMMODITY);
-
-   /* Get window dimensions. */
-   window_dimWindow( wid, &w, &h );
-
-   /* buttons */
-   window_addButtonKey( wid, -20, 20,
-         LAND_BUTTON_WIDTH, LAND_BUTTON_HEIGHT, "btnCommodityClose",
-         "Take Off", land_buttonTakeoff, SDLK_t );
-   window_addButtonKey( wid, -40-((LAND_BUTTON_WIDTH-20)/2), 20*2 + LAND_BUTTON_HEIGHT,
-         (LAND_BUTTON_WIDTH-20)/2, LAND_BUTTON_HEIGHT, "btnCommodityBuy",
-         "Buy", commodity_buy, SDLK_b );
-   window_addButtonKey( wid, -20, 20*2 + LAND_BUTTON_HEIGHT,
-         (LAND_BUTTON_WIDTH-20)/2, LAND_BUTTON_HEIGHT, "btnCommoditySell",
-         "Sell", commodity_sell, SDLK_s );
-
-      /* cust draws the modifier */
-   window_addCust( wid, -40-((LAND_BUTTON_WIDTH-20)/2), 60+ 2*LAND_BUTTON_HEIGHT,
-         (LAND_BUTTON_WIDTH-20)/2, LAND_BUTTON_HEIGHT, "cstMod", 0, commodity_renderMod, NULL, NULL );
-
-   /* text */
-   window_addText( wid, -20, -40, LAND_BUTTON_WIDTH, 60, 0,
-         "txtSInfo", &gl_smallFont, &cDConsole,
-         "You have:\n"
-         "Market Price:\n"
-         "\n"
-         "Free Space:\n" );
-   window_addText( wid, -20, -40, LAND_BUTTON_WIDTH/2, 60, 0,
-         "txtDInfo", &gl_smallFont, &cBlack, NULL );
-   window_addText( wid, -40, -120, LAND_BUTTON_WIDTH-20,
-         h-140-LAND_BUTTON_HEIGHT, 0,
-         "txtDesc", &gl_smallFont, &cBlack, NULL );
-
-   /* goods list */
-   if (land_planet->ncommodities > 0) {
-      goods = malloc(sizeof(char*) * land_planet->ncommodities);
-      for (i=0; i<land_planet->ncommodities; i++)
-         goods[i] = strdup(land_planet->commodities[i]->name);
-      ngoods = land_planet->ncommodities;
-   }
-   else {
-      goods    = malloc( sizeof(char*) );
-      goods[0] = strdup("None");
-      ngoods   = 1;
-   }
-   window_addList( wid, 20, -40,
-         w-LAND_BUTTON_WIDTH-60, h-80-LAND_BUTTON_HEIGHT,
-         "lstGoods", goods, ngoods, 0, commodity_update );
-   /* Set default keyboard focuse to the list */
-   window_setFocus( wid , "lstGoods" );
-}
-/**
- * @brief Updates the commodity window.
- *    @param wid Window to update.
- *    @param str Unused.
- */
-static void commodity_update( unsigned int wid, char* str )
-{
-   (void)str;
-   char buf[PATH_MAX];
-   char *comname;
-   Commodity *com;
-
-   comname = toolkit_getList( wid, "lstGoods" );
-   if ((comname==NULL) || (strcmp( comname, "None" )==0)) {
-      nsnprintf( buf, PATH_MAX,
-         "NA Tons\n"
-         "NA Credits/Ton\n"
-         "\n"
-         "NA Tons\n" );
-      window_modifyText( wid, "txtDInfo", buf );
-      window_modifyText( wid, "txtDesc", "No outfits available." );
-      window_disableButton( wid, "btnCommodityBuy" );
-      window_disableButton( wid, "btnCommoditySell" );
-      return;
-   }
-   com = commodity_get( comname );
-
-   /* modify text */
-   nsnprintf( buf, PATH_MAX,
-         "%d Tons\n"
-         "%"CREDITS_PRI" Credits/Ton\n"
-         "\n"
-         "%d Tons\n",
-         pilot_cargoOwned( player.p, comname ),
-         planet_commodityPrice( land_planet, com ),
-         pilot_cargoFree(player.p));
-   window_modifyText( wid, "txtDInfo", buf );
-   window_modifyText( wid, "txtDesc", com->description );
-
-   /* Button enabling/disabling */
-   if (commodity_canBuy( comname ))
-      window_enableButton( wid, "btnCommodityBuy" );
-   else
-      window_disableButtonSoft( wid, "btnCommodityBuy" );
-
-   if (commodity_canSell( comname ))
-      window_enableButton( wid, "btnCommoditySell" );
-   else
-      window_disableButtonSoft( wid, "btnCommoditySell" );
-}
-
-
-static int commodity_canBuy( char *name )
-{
-   int failure;
-   unsigned int q, price;
-   Commodity *com;
-   char buf[ECON_CRED_STRLEN];
-
-   failure = 0;
-   q = commodity_getMod();
-   com = commodity_get( name );
-   price = planet_commodityPrice( land_planet, com ) * q;
-
-   if (!player_hasCredits( price )) {
-      credits2str( buf, price - player.p->credits, 2 );
-      land_errDialogueBuild("You need %s more credits.", buf );
-      failure = 1;
-   }
-   if (pilot_cargoFree(player.p) <= 0) {
-      land_errDialogueBuild("No cargo space available!");
-      failure = 1;
-   }
-
-   return !failure;
-}
-
-
-static int commodity_canSell( char *name )
-{
-   int failure;
-
-   failure = 0;
-
-   if (pilot_cargoOwned( player.p, name ) == 0) {
-      land_errDialogueBuild("You can't sell something you don't have!");
-      failure = 1;
-   }
-
-   return !failure;
-}
-
-
-/**
- * @brief Buys the selected commodity.
- *    @param wid Window buying from.
- *    @param str Unused.
- */
-static void commodity_buy( unsigned int wid, char* str )
-{
-   (void)str;
-   char *comname;
-   Commodity *com;
-   unsigned int q;
-   credits_t price;
-   HookParam hparam[3];
-
-   /* Get selected. */
-   q     = commodity_getMod();
-   comname = toolkit_getList( wid, "lstGoods" );
-   com   = commodity_get( comname );
-   price = planet_commodityPrice( land_planet, com );
-
-   /* Check stuff. */
-   if (land_errDialogue( comname, "buyCommodity" ))
-      return;
-
-   /* Make the buy. */
-   q = pilot_cargoAdd( player.p, com, q, 0 );
-   price *= q;
-   player_modCredits( -price );
-   commodity_update(wid, NULL);
-
-   /* Run hooks. */
-   hparam[0].type    = HOOK_PARAM_STRING;
-   hparam[0].u.str   = comname;
-   hparam[1].type    = HOOK_PARAM_NUMBER;
-   hparam[1].u.num   = q;
-   hparam[2].type    = HOOK_PARAM_SENTINEL;
-   hooks_runParam( "comm_buy", hparam );
-   if (land_takeoff)
-      takeoff(1);
-}
-/**
- * @brief Attempts to sell a commodity.
- *    @param wid Window selling commodity from.
- *    @param str Unused.
- */
-static void commodity_sell( unsigned int wid, char* str )
-{
-   (void)str;
-   char *comname;
-   Commodity *com;
-   unsigned int q;
-   credits_t price;
-   HookParam hparam[3];
-
-   /* Get parameters. */
-   q     = commodity_getMod();
-   comname = toolkit_getList( wid, "lstGoods" );
-   com   = commodity_get( comname );
-   price = planet_commodityPrice( land_planet, com );
-
-   /* Check stuff. */
-   if (land_errDialogue( comname, "sellCommodity" ))
-      return;
-
-   /* Remove commodity. */
-   q = pilot_cargoRm( player.p, com, q );
-   price = price * (credits_t)q;
-   player_modCredits( price );
-   commodity_update(wid, NULL);
-
-   /* Run hooks. */
-   hparam[0].type    = HOOK_PARAM_STRING;
-   hparam[0].u.str   = comname;
-   hparam[1].type    = HOOK_PARAM_NUMBER;
-   hparam[1].u.num   = q;
-   hparam[2].type    = HOOK_PARAM_SENTINEL;
-   hooks_runParam( "comm_sell", hparam );
-   if (land_takeoff)
-      takeoff(1);
-}
-
-/**
- * @brief Gets the current modifier status.
- *    @return The amount modifier when buying or selling commodities.
- */
-static int commodity_getMod (void)
-{
-   SDLMod mods;
-   int q;
-
-   mods = SDL_GetModState();
-   q = 10;
-   if (mods & (KMOD_LCTRL | KMOD_RCTRL))
-      q *= 5;
-   if (mods & (KMOD_LSHIFT | KMOD_RSHIFT))
-      q *= 10;
-
-   return q;
-}
-/**
- * @brief Renders the commodity buying modifier.
- *    @param bx Base X position to render at.
- *    @param by Base Y position to render at.
- *    @param w Width to render at.
- *    @param h Height to render at.
- */
-static void commodity_renderMod( double bx, double by, double w, double h, void *data )
-{
-   (void) data;
-   (void) h;
-   int q;
-   char buf[8];
-
-   q = commodity_getMod();
-   if (q != commodity_mod) {
-      commodity_update( land_getWid(LAND_WINDOW_COMMODITY), NULL );
-      commodity_mod = q;
-   }
-   nsnprintf( buf, 8, "%dx", q );
-   gl_printMid( &gl_smallFont, w, bx, by, &cBlack, buf );
-}
-
-
-/**
  * @brief Makes sure it's sane to change ships in the equipment view.
  *    @param shipname Ship being changed to.
  */
@@ -469,21 +174,21 @@ int can_swapEquipment( char* shipname )
    newship = player_getShip(shipname);
 
    if (strcmp(shipname,player.p->name)==0) { /* Already onboard. */
-      land_errDialogueBuild( "You're already onboard the %s.", shipname );
+      land_errDialogueBuild( _("You're already onboard the %s."), shipname );
       failure = 1;
    }
    if (strcmp(loc,land_planet->name)) { /* Ship isn't here. */
-      dialogue_alert( "You must transport the ship to %s to be able to get in.",
+      dialogue_alert( _("You must transport the ship to %s to be able to get in."),
             land_planet->name );
       failure = 1;
    }
    if (pilot_cargoUsed(player.p) > (pilot_cargoFree(newship) + pilot_cargoUsed(newship))) { /* Current ship has too much cargo. */
-      land_errDialogueBuild( "You have %d tons more cargo than the new ship can hold.",
+      land_errDialogueBuild( _("You have %d tons more cargo than the new ship can hold."),
             pilot_cargoUsed(player.p) - pilot_cargoFree(newship), shipname );
       failure = 1;
    }
    if (pilot_hasDeployed(player.p)) { /* Escorts are in space. */
-      land_errDialogueBuild( "You can't strand your fighters in space.");
+      land_errDialogueBuild( _("You can't strand your fighters in space.") );
       failure = 1;
    }
    return !failure;
@@ -587,10 +292,10 @@ static void bar_open( unsigned int wid )
    /* Buttons */
    window_addButtonKey( wid, -20, 20,
          bw, bh, "btnCloseBar",
-         "Take Off", land_buttonTakeoff, SDLK_t );
+         _("Take Off"), land_buttonTakeoff, SDLK_t );
    window_addButtonKey( wid, -20 - bw - 20, 20,
          bw, bh, "btnApproach",
-         "Approach", bar_approach, SDLK_a );
+         _("Approach"), bar_approach, SDLK_a );
 
    /* Bar description. */
    window_addText( wid, iw + 40, -40,
@@ -660,7 +365,7 @@ static int bar_genList( unsigned int wid )
       portraits    = malloc(sizeof(glTexture*));
       portraits[0] = mission_portrait;
       names        = malloc(sizeof(char*));
-      names[0]     = strdup("News");
+      names[0]     = strdup(_("News"));
    }
    else {
       n            = n+1;
@@ -668,7 +373,7 @@ static int bar_genList( unsigned int wid )
       portraits[0] = mission_portrait;
       npc_getTextureArray( &portraits[1], n-1 );
       names        = malloc( sizeof(char*) * n );
-      names[0]     = strdup("News");
+      names[0]     = strdup(_("News"));
       npc_getNameArray( &names[1], n-1 );
    }
    window_addImageArray( wid, 20, -40,
@@ -846,25 +551,25 @@ static void misn_open( unsigned int wid )
    /* buttons */
    window_addButtonKey( wid, -20, 20,
          LAND_BUTTON_WIDTH,LAND_BUTTON_HEIGHT, "btnCloseMission",
-         "Take Off", land_buttonTakeoff, SDLK_t );
+         _("Take Off"), land_buttonTakeoff, SDLK_t );
    window_addButtonKey( wid, -20, 40+LAND_BUTTON_HEIGHT,
          LAND_BUTTON_WIDTH,LAND_BUTTON_HEIGHT, "btnAcceptMission",
-         "Accept Mission", misn_accept, SDLK_a );
+         _("Accept Mission"), misn_accept, SDLK_a );
 
    /* text */
    y = -60;
    window_addText( wid, w/2 + 10, y,
          w/2 - 30, 40, 0,
          "txtSDate", NULL, &cDConsole,
-         "Date:\n"
-         "Free Space:");
+         _("Date:\n"
+         "Free Space:"));
    window_addText( wid, w/2 + 110, y,
          w/2 - 90, 40, 0,
          "txtDate", NULL, &cBlack, NULL );
    y -= 2 * gl_defFont.h + 50;
    window_addText( wid, w/2 + 10, y,
          w/2 - 30, 20, 0,
-         "txtSReward", &gl_smallFont, &cDConsole, "Reward:" );
+         "txtSReward", &gl_smallFont, &cDConsole, _("Reward:") );
    window_addText( wid, w/2 + 70, y,
          w/2 - 90, 20, 0,
          "txtReward", &gl_smallFont, &cBlack, NULL );
@@ -910,19 +615,19 @@ static void misn_accept( unsigned int wid, char* str )
    misn_name = toolkit_getList( wid, "lstMission" );
 
    /* Make sure you have missions. */
-   if (strcmp(misn_name,"No Missions")==0)
+   if (strcmp(misn_name,_("No Missions"))==0)
       return;
 
    /* Make sure player can accept the mission. */
    for (i=0; i<MISSION_MAX; i++)
       if (player_missions[i]->data == NULL) break;
    if (i >= MISSION_MAX) {
-      dialogue_alert("You have too many active missions.");
+      dialogue_alert( _("You have too many active missions.") );
       return;
    }
 
-   if (dialogue_YesNo("Accept Mission",
-         "Are you sure you want to accept this mission?")) {
+   if (dialogue_YesNo( _("Accept Mission"),
+         _("Are you sure you want to accept this mission?"))) {
       pos = toolkit_getListPos( wid, "lstMission" );
       misn = &mission_computer[pos];
       ret = mission_accept( misn );
@@ -978,7 +683,7 @@ static void misn_genList( unsigned int wid, int first )
       if (j==0)
          free(misn_names);
       misn_names = malloc(sizeof(char*));
-      misn_names[0] = strdup("No Missions");
+      misn_names[0] = strdup(_("No Missions"));
       j = 1;
    }
    window_addList( wid, 20, -40,
@@ -1007,15 +712,15 @@ static void misn_update( unsigned int wid, char* str )
 
    /* Update date stuff. */
    buf = ntime_pretty( 0, 2 );
-   nsnprintf( txt, sizeof(txt), "%s\n%d Tons", buf, player.p->cargo_free );
+   nsnprintf( txt, sizeof(txt), _("%s\n%d Tons"), buf, player.p->cargo_free );
    free(buf);
    window_modifyText( wid, "txtDate", txt );
 
    active_misn = toolkit_getList( wid, "lstMission" );
-   if (strcmp(active_misn,"No Missions")==0) {
-      window_modifyText( wid, "txtReward", "None" );
+   if (strcmp(active_misn,_("No Missions"))==0) {
+      window_modifyText( wid, "txtReward", _("None") );
       window_modifyText( wid, "txtDesc",
-            "There are no missions available here." );
+            _("There are no missions available here.") );
       window_disableButton( wid, "btnAcceptMission" );
       return;
    }
@@ -1069,7 +774,7 @@ static void spaceport_buyMap( unsigned int wid, char *str )
 
    o = outfit_get( LOCAL_MAP_NAME );
    if (o == NULL) {
-      WARN("Outfit '%s' does not exist!", LOCAL_MAP_NAME);
+      WARN( _("Outfit '%s' does not exist!"), LOCAL_MAP_NAME);
       return;
    }
 
@@ -1100,7 +805,7 @@ void land_checkAddMap (void)
 
    o = outfit_get( LOCAL_MAP_NAME );
    if (o == NULL) {
-      WARN("Outfit '%s' does not exist!", LOCAL_MAP_NAME);
+      WARN( _("Outfit '%s' does not exist!"), LOCAL_MAP_NAME);
       return;
    }
 
@@ -1111,7 +816,7 @@ void land_checkAddMap (void)
    else {
       /* Refuel button. */
       credits2str( cred, o->price, 2 );
-      nsnprintf( buf, sizeof(buf), "Buy Local Map (%s)", cred );
+      nsnprintf( buf, sizeof(buf), _("Buy Local Map (%s)"), cred );
       window_addButtonKey( land_windows[0], -20, 20 + (LAND_BUTTON_HEIGHT + 20),
             LAND_BUTTON_WIDTH,LAND_BUTTON_HEIGHT, "btnMap",
             buf, spaceport_buyMap, SDLK_b );
@@ -1225,37 +930,37 @@ void land_genWindows( int load, int changetab )
    j = 0;
    /* Main. */
    land_windowsMap[LAND_WINDOW_MAIN] = j;
-   names[j++] = land_windowNames[LAND_WINDOW_MAIN];
+   names[j++] = _("Landing Main");
    /* Bar. */
    if (planet_hasService(land_planet, PLANET_SERVICE_BAR)) {
       land_windowsMap[LAND_WINDOW_BAR] = j;
-      names[j++] = land_windowNames[LAND_WINDOW_BAR];
+      names[j++] = _("Spaceport Bar");
    }
    /* Missions. */
    if (planet_hasService(land_planet, PLANET_SERVICE_MISSIONS)) {
       land_windowsMap[LAND_WINDOW_MISSION] = j;
-      names[j++] = land_windowNames[LAND_WINDOW_MISSION];
+      names[j++] = _("Missions");
    }
    /* Outfits. */
    if (planet_hasService(land_planet, PLANET_SERVICE_OUTFITS)) {
       land_windowsMap[LAND_WINDOW_OUTFITS] = j;
-      names[j++] = land_windowNames[LAND_WINDOW_OUTFITS];
+      names[j++] = _("Outfits");
    }
    /* Shipyard. */
    if (planet_hasService(land_planet, PLANET_SERVICE_SHIPYARD)) {
       land_windowsMap[LAND_WINDOW_SHIPYARD] = j;
-      names[j++] = land_windowNames[LAND_WINDOW_SHIPYARD];
+      names[j++] = _("Shipyard");
    }
    /* Equipment. */
    if (planet_hasService(land_planet, PLANET_SERVICE_OUTFITS) ||
          planet_hasService(land_planet, PLANET_SERVICE_SHIPYARD)) {
       land_windowsMap[LAND_WINDOW_EQUIPMENT] = j;
-      names[j++] = land_windowNames[LAND_WINDOW_EQUIPMENT];
+      names[j++] = _("Equipment");
    }
    /* Commodity. */
    if (planet_hasService(land_planet, PLANET_SERVICE_COMMODITY)) {
       land_windowsMap[LAND_WINDOW_COMMODITY] = j;
-      names[j++] = land_windowNames[LAND_WINDOW_COMMODITY];
+      names[j++] = _("Commodity");
    }
 
    /* Create tabbed window. */
@@ -1454,13 +1159,13 @@ static void land_createMainTab( unsigned int wid )
    /* first column */
    window_addButtonKey( wid, -20, 20,
          LAND_BUTTON_WIDTH, LAND_BUTTON_HEIGHT, "btnTakeoff",
-         "Take Off", land_buttonTakeoff, SDLK_t );
+         _("Take Off"), land_buttonTakeoff, SDLK_t );
 
    /* Add "no refueling" notice if needed. */
    if (!planet_hasService(land_planet, PLANET_SERVICE_REFUEL)) {
       window_addText( land_windows[0], -20, 20 + (LAND_BUTTON_HEIGHT + 20) + 20,
                200, gl_defFont.h, 1, "txtRefuel",
-               &gl_defFont, &cBlack, "No refueling services." );
+               &gl_defFont, &cBlack, _("No refueling services.") );
    }
 }
 
@@ -1577,7 +1282,7 @@ void takeoff( int delay )
    if (!player_canTakeoff()) {
       char message[512];
       pilot_reportSpaceworthy( player.p, message, sizeof(message) );
-      dialogue_msg( "Ship not fit for flight", message );
+      dialogue_msg( _("Ship not fit for flight"), message );
 
       /* Check whether the player needs rescuing. */
       land_stranded();
@@ -1624,13 +1329,13 @@ void takeoff( int delay )
 
    /* cleanup */
    if (save_all() < 0) /* must be before cleaning up planet */
-      dialogue_alert( "Failed to save game! You should exit and check the log to see what happened and then file a bug report!" );
+      dialogue_alert( _("Failed to save game! You should exit and check the log to see what happened and then file a bug report!") );
 
    /* time goes by, triggers hook before takeoff */
    if (delay)
       ntime_inc( ntime_create( 0, 1, 0 ) ); /* 1 STP */
    nt = ntime_pretty( 0, 2 );
-   player_message("\epTaking off from %s on %s.", land_planet->name, nt);
+   player_message( _("\apTaking off from %s on %s."), land_planet->name, nt);
    free(nt);
 
    /* Hooks and stuff. */
@@ -1651,6 +1356,9 @@ void takeoff( int delay )
    pilot_setFlag( player.p, PILOT_TAKEOFF );
    pilot_setThrust( player.p, 0. );
    pilot_setTurn( player.p, 0. );
+
+   /* Reset speed */
+   player_autonavResetSpeed();
    }
 
 
@@ -1660,53 +1368,36 @@ void takeoff( int delay )
 static void land_stranded (void)
 {
    char *buf;
-   uint32_t bufsize;
+   size_t bufsize;
    const char *file = "dat/rescue.lua";
-   int errf;
-   lua_State *L;
 
    /* Nothing to do if there's no rescue script. */
    if (!ndata_exists(file))
       return;
 
-   if (rescue_L == NULL) {
-      rescue_L = nlua_newState();
-      nlua_loadStandard( rescue_L, 0 );
-      nlua_loadTk( rescue_L );
-
-      L = rescue_L;
+   if (rescue_env == LUA_NOREF) {
+      rescue_env = nlua_newEnv(1);
+      nlua_loadStandard( rescue_env );
+      nlua_loadTk( rescue_env );
 
       buf = ndata_read( file, &bufsize );
-      if (luaL_dobuffer(L, buf, bufsize, file) != 0) {
-         WARN("Error loading file: %s\n"
+      if (nlua_dobufenv(rescue_env, buf, bufsize, file) != 0) {
+         WARN( _("Error loading file: %s\n"
              "%s\n"
-             "Most likely Lua file has improper syntax, please check",
-               file, lua_tostring(L,-1));
+             "Most likely Lua file has improper syntax, please check"),
+               file, lua_tostring(naevL,-1));
          free(buf);
          return;
       }
       free(buf);
    }
-   else
-      L = rescue_L;
-
-#if DEBUGGING
-   lua_pushcfunction(L, nlua_errTrace);
-   errf = -2;
-#else /* DEBUGGING */
-   errf = 0;
-#endif /* DEBUGGING */
-
 
    /* Run Lua. */
-   lua_getglobal(L,"rescue");
-   if (lua_pcall(L, 0, 0, errf)) { /* error has occurred */
-      WARN("Rescue: 'rescue' : '%s'", lua_tostring(L,-1));
-      lua_pop(L,1);
+   nlua_getenv(rescue_env,"rescue");
+   if (nlua_pcall(rescue_env, 0, 0)) { /* error has occurred */
+      WARN( _("Rescue: 'rescue' : '%s'"), lua_tostring(naevL,-1));
+      lua_pop(naevL,1);
    }
-#if DEBUGGING
-   lua_pop(L,1);
-#endif
 }
 
 
@@ -1746,9 +1437,9 @@ void land_cleanup (void)
    npc_freeAll();
 
    /* Clean up rescue Lua. */
-   if (rescue_L != NULL) {
-      lua_close(rescue_L);
-      rescue_L = NULL;
+   if (rescue_env != LUA_NOREF) {
+      nlua_freeEnv(rescue_env);
+      rescue_env = LUA_NOREF;
    }
 }
 

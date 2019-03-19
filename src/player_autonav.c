@@ -19,6 +19,7 @@
 #include "pilot.h"
 #include "pilot_ew.h"
 #include "space.h"
+#include "sound.h"
 #include "conf.h"
 #include <time.h>
 
@@ -48,11 +49,13 @@ static int player_autonavBrake (void);
 void player_autonavResetSpeed (void)
 {
    if (player_isFlag(PLAYER_DOUBLESPEED)) {
-     tc_mod         = 2.;
-     pause_setSpeed( 2. );
+      tc_mod         = 2. * player.p->ship->dt_default;
+      pause_setSpeed( tc_mod );
+      sound_setSpeed( 2 );
    } else {
-     tc_mod         = 1.;
-     pause_setSpeed( 1. );
+      tc_mod         = player.p->ship->dt_default;
+      pause_setSpeed( tc_mod );
+      sound_setSpeed( 1 );
    }
    tc_rampdown = 0;
 }
@@ -76,12 +79,12 @@ void player_autonavStart (void)
    }
 
    if (player.p->fuel < player.p->fuel_consumption) {
-      player_message("\erNot enough fuel to jump for autonav.");
+      player_message(_("\arNot enough fuel to jump for autonav."));
       return;
    }
 
    if (pilot_isFlag( player.p, PILOT_NOJUMP)) {
-      player_message("\erHyperspace drive is offline.");
+      player_message(_("\arHyperspace drive is offline."));
       return;
    }
 
@@ -107,10 +110,10 @@ static int player_autonavSetup (void)
    /* Autonav is mutually-exclusive with other autopilot methods. */
    player_restoreControl( PINPUT_AUTONAV, NULL );
 
-   player_message("\epAutonav initialized.");
+   player_message(_("\apAutonav initialized."));
    if (!player_isFlag(PLAYER_AUTONAV)) {
 
-      tc_base   = player_isFlag(PLAYER_DOUBLESPEED) ? 2. : 1.;
+      tc_base   = player.p->ship->dt_default * (player_isFlag(PLAYER_DOUBLESPEED) ? 2. : 1.);
       tc_mod    = tc_base;
       if (conf.compression_mult >= 1.)
          player.tc_max = MIN( conf.compression_velocity / solid_maxspeed(player.p->solid, player.p->speed, player.p->thrust), conf.compression_mult );
@@ -131,6 +134,7 @@ static int player_autonavSetup (void)
    /* Set flag and tc_mod just in case. */
    player_setFlag(PLAYER_AUTONAV);
    pause_setSpeed( tc_mod );
+   sound_setSpeed( tc_mod / player.p->ship->dt_default );
 
    /* Make sure time acceleration starts immediately. */
    player.autonav_timer = 0.;
@@ -247,9 +251,9 @@ void player_autonavAbort( const char *reason )
 
    if (player_isFlag(PLAYER_AUTONAV)) {
       if (reason != NULL)
-         player_message("\erAutonav aborted: %s!", reason);
+         player_message(_("\arAutonav aborted: %s!"), reason);
       else
-         player_message("\erAutonav aborted!");
+         player_message(_("\arAutonav aborted!"));
       player_rmFlag(PLAYER_AUTONAV);
 
       /* Get rid of acceleration. */
@@ -258,7 +262,7 @@ void player_autonavAbort( const char *reason )
       /* Break possible hyperspacing. */
       if (pilot_isFlag(player.p, PILOT_HYP_PREP)) {
          pilot_hyperspaceAbort(player.p);
-         player_message("\epAborting hyperspace sequence.");
+         player_message(_("\apAborting hyperspace sequence."));
       }
 
       /* Reset time compression. */
@@ -342,7 +346,7 @@ static void player_autonav (void)
       case AUTONAV_POS_APPROACH:
          ret = player_autonavApproach( &player.autonav_pos, &d, 1 );
          if (ret) {
-            player_message( "\epAutonav arrived at position." );
+            player_message( _("\apAutonav arrived at position.") );
             player_autonavEnd();
          }
          else if (!tc_rampdown)
@@ -351,7 +355,7 @@ static void player_autonav (void)
       case AUTONAV_PNT_APPROACH:
          ret = player_autonavApproach( &player.autonav_pos, &d, 1 );
          if (ret) {
-            player_message( "\epAutonav arrived at \e%c%s\e\0.",
+            player_message( _("\apAutonav arrived at \a%c%s\a\0."),
                   planet_getColourChar( planet_get(player.autonavmsg) ),
                   player.autonavmsg );
             player_autonavEnd();
@@ -510,11 +514,11 @@ void player_thinkAutonav( Pilot *pplayer, double dt )
          (player.autonav == AUTONAV_JUMP_BRAKE)) {
       /* If we're already at the target. */
       if (player.p->nav_hyperspace == -1)
-         player_autonavAbort("Target changed to current system");
+         player_autonavAbort(_("Target changed to current system"));
 
       /* Need fuel. */
       else if (pplayer->fuel < pplayer->fuel_consumption)
-         player_autonavAbort("Not enough fuel for autonav to continue");
+         player_autonavAbort(_("Not enough fuel for autonav to continue"));
 
       else
          player_autonav();
@@ -566,6 +570,7 @@ void player_updateAutonav( double dt )
             tc_mod = MIN( dis_max, tc_mod + dis_mod*dt );
       }
       pause_setSpeed( tc_mod );
+      sound_setSpeed( tc_mod / player.p->ship->dt_default );
       return;
    }
 
@@ -578,6 +583,7 @@ void player_updateAutonav( double dt )
       if (tc_mod != tc_base) {
          tc_mod = MAX( tc_base, tc_mod-tc_down*dt );
          pause_setSpeed( tc_mod );
+         sound_setSpeed( tc_mod / player.p->ship->dt_default );
       }
       return;
    }
@@ -591,6 +597,7 @@ void player_updateAutonav( double dt )
    if (tc_mod > player.tc_max)
       tc_mod = player.tc_max;
    pause_setSpeed( tc_mod );
+   sound_setSpeed( tc_mod / player.p->ship->dt_default );
 }
 
 

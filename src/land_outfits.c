@@ -22,6 +22,7 @@
 #include "map.h"
 #include "equipment.h"
 #include "outfit.h"
+#include "hook.h"
 #include "player.h"
 #include "player_gui.h"
 #include "slots.h"
@@ -29,6 +30,7 @@
 #include "toolkit.h"
 #include "dialogue.h"
 #include "map_find.h"
+#include "land_takeoff.h"
 
 
 #define  OUTFITS_IAR    "iarOutfits"
@@ -113,16 +115,16 @@ void outfits_open( unsigned int wid )
    /* buttons */
    window_addButtonKey( wid, off = -20, 20,
          bw, bh, "btnCloseOutfits",
-         "Take Off", land_buttonTakeoff, SDLK_t );
+         _("Take Off"), land_buttonTakeoff, SDLK_t );
    window_addButtonKey( wid, off -= 20+bw, 20,
          bw, bh, "btnSellOutfit",
-         "Sell", outfits_sell, SDLK_s );
+         _("Sell"), outfits_sell, SDLK_s );
    window_addButtonKey( wid, off -= 20+bw, 20,
          bw, bh, "btnBuyOutfit",
-         "Buy", outfits_buy, SDLK_b );
+         _("Buy"), outfits_buy, SDLK_b );
    window_addButtonKey( wid, off -= 20+bw, 20,
          bw, bh, "btnFindOutfits",
-         "Find Outfits", outfits_find, SDLK_f );
+         _("Find Outfits"), outfits_find, SDLK_f );
 
    /* fancy 128x128 image */
    window_addRect( wid, 19 + iw + 20, -50, 128, 129, "rctImage", &cBlack, 0 );
@@ -139,7 +141,7 @@ void outfits_open( unsigned int wid )
          280, 160, 0, "txtDescShort", &gl_smallFont, &cBlack, NULL );
    window_addText( wid, 20 + iw + 20, -60-128-10,
          60, 160, 0, "txtSDesc", &gl_smallFont, &cDConsole,
-         "Owned:\n"
+         _("Owned:\n"
          "\n"
          "Slot:\n"
          "Size:\n"
@@ -147,7 +149,7 @@ void outfits_open( unsigned int wid )
          "\n"
          "Price:\n"
          "Money:\n"
-         "License:\n" );
+         "License:\n") );
    window_addText( wid, 20 + iw + 20 + 60, -60-128-10,
          250, 160, 0, "txtDDesc", &gl_smallFont, &cBlack, NULL );
    window_addText( wid, 20 + iw + 20, -60-128-10-160,
@@ -233,7 +235,7 @@ static void outfits_genList( unsigned int wid )
       outfit_filterOther
    };
    const char *tabnames[] = {
-      "All", "\eb W ", "\eg U ", "\ep S ", "\eRCore", "Other"
+      _("All"), _("\ab W "), _("\ag U "), _("\ap S "), _("\aRCore"), _("Other")
    };
 
    int i, active, owned, len;
@@ -295,7 +297,7 @@ static void outfits_genList( unsigned int wid )
          tabfilters[active], filtertext );
 
    if (noutfits <= 0) { /* No outfits */
-      soutfits[0] = strdup("None");
+      soutfits[0] = strdup(_("None"));
       toutfits[0] = NULL;
       noutfits    = 1;
    }
@@ -312,7 +314,7 @@ static void outfits_genList( unsigned int wid )
          if (c == NULL)
             c = &cBlack;
          col_blend( &blend, c, &cGrey70, 0.4 );
-         memcpy( &bg[i], &blend, sizeof(glColour) );
+         bg[i] = blend;
 
          /* Quantity. */
          owned = player_outfitOwned(outfits[i]);
@@ -380,7 +382,7 @@ void outfits_update( unsigned int wid, char* str )
       window_disableButton( wid, "btnBuyOutfit" );
       window_disableButton( wid, "btnSellOutfit" );
       nsnprintf( buf, PATH_MAX,
-            "NA\n"
+            _("NA\n"
             "\n"
             "NA\n"
             "NA\n"
@@ -388,9 +390,9 @@ void outfits_update( unsigned int wid, char* str )
             "\n"
             "NA\n"
             "NA\n"
-            "NA\n" );
+            "NA\n") );
       window_modifyText( wid, "txtDDesc", buf );
-      window_modifyText( wid, "txtOutfitName", "None" );
+      window_modifyText( wid, "txtOutfitName", _("None") );
       window_modifyText( wid, "txtDescShort", NULL );
       window_modifyText( wid, "txtDescription", NULL );
       /* Reposition. */
@@ -423,14 +425,14 @@ void outfits_update( unsigned int wid, char* str )
    credits2str( buf3, player.p->credits, 2 );
 
    if (outfit->license == NULL)
-      strncpy( buf4, "None", sizeof(buf4) );
+      strncpy( buf4, _("None"), sizeof(buf4) );
    else if (player_hasLicense( outfit->license ))
       strncpy( buf4, outfit->license, sizeof(buf4) );
    else
-      nsnprintf( buf4, sizeof(buf4), "\er%s\e0", outfit->license );
+      nsnprintf( buf4, sizeof(buf4), "\ar%s\a0", outfit->license );
 
    nsnprintf( buf, PATH_MAX,
-         "%d\n"
+         _("%d\n"
          "\n"
          "%s\n"
          "%s\n"
@@ -438,7 +440,7 @@ void outfits_update( unsigned int wid, char* str )
          "\n"
          "%s credits\n"
          "%s credits\n"
-         "%s\n",
+         "%s\n"),
          player_outfitOwned(outfit),
          outfit_slotName(outfit),
          outfit_slotSize(outfit),
@@ -594,29 +596,29 @@ int outfit_canBuy( char *name, Planet *planet )
    /* Map already mapped */
    if ((outfit_isMap(outfit) && map_isMapped(outfit)) ||
          (outfit_isLocalMap(outfit) && localmap_isMapped(outfit))) {
-      land_errDialogueBuild( "You already know of everything this map contains." );
+      land_errDialogueBuild( _("You already know of everything this map contains.") );
       return 0;
    }
    /* GUI already owned */
    if (outfit_isGUI(outfit) && player_guiCheck(outfit->u.gui.gui)) {
-      land_errDialogueBuild( "You already own this GUI." );
+      land_errDialogueBuild( _("You already own this GUI.") );
       return 0;
    }
    /* Already has license. */
    if (outfit_isLicense(outfit) && player_hasLicense(outfit->name)) {
-      land_errDialogueBuild( "You already have this license." );
+      land_errDialogueBuild( _("You already have this license.") );
       return 0;
    }
    /* not enough $$ */
    if (!player_hasCredits(price)) {
       credits2str( buf, price - player.p->credits, 2 );
-      land_errDialogueBuild( "You need %s more credits.", buf);
+      land_errDialogueBuild( _("You need %s more credits."), buf);
       failure = 1;
    }
    /* Needs license. */
    if ((!player_hasLicense(outfit->license)) &&
-         ((planet == NULL) || (!planet_isBlackMarket(planet)))) {
-      land_errDialogueBuild( "You need the '%s' license to buy this outfit.",
+         ((planet == NULL) || (!planet_hasService(planet, PLANET_SERVICE_BLACKMARKET)))) {
+      land_errDialogueBuild( _("You need the '%s' license to buy this outfit."),
                outfit->license );
       failure = 1;
    }
@@ -647,8 +649,9 @@ static void outfits_buy( unsigned int wid, char* str )
    char *outfitname;
    Outfit* outfit;
    int q;
+   HookParam hparam[3];
 
-   outfitname = toolkit_getImageArray( wid, OUTFITS_IAR );
+   outfitname = strdup(toolkit_getImageArray( wid, OUTFITS_IAR ));
    if (strcmp(outfitname, "None") == 0)
       return;
 
@@ -663,6 +666,15 @@ static void outfits_buy( unsigned int wid, char* str )
    /* Actually buy the outfit. */
    player_modCredits( -outfit->price * player_addOutfit( outfit, q ) );
    outfits_updateEquipmentOutfits();
+   hparam[0].type    = HOOK_PARAM_STRING;
+   hparam[0].u.str   = outfitname;
+   hparam[1].type    = HOOK_PARAM_NUMBER;
+   hparam[1].u.num   = q;
+   hparam[2].type    = HOOK_PARAM_SENTINEL;
+   hooks_runParam( "outfit_buy", hparam );
+   if (land_takeoff)
+      takeoff(1);
+   free(outfitname);
 }
 /**
  * @brief Checks to see if the player can sell the selected outfit.
@@ -678,25 +690,25 @@ int outfit_canSell( char *name )
 
    /* Map check. */
    if (outfit_isMap(outfit) || outfit_isLocalMap(outfit)) {
-      land_errDialogueBuild("You can't sell a map.");
+      land_errDialogueBuild(_("You can't sell a map."));
       failure = 1;
    }
 
    /* GUI check. */
    if (outfit_isGUI(outfit)) {
-      land_errDialogueBuild("You can't sell a GUI.");
+      land_errDialogueBuild(_("You can't sell a GUI."));
       failure = 1;
    }
 
    /* License check. */
    if (outfit_isLicense(outfit)) {
-      land_errDialogueBuild("You can't sell a license.");
+      land_errDialogueBuild(_("You can't sell a license."));
       failure = 1;
    }
 
    /* has no outfits to sell */
    if (player_outfitOwned(outfit) <= 0) {
-      land_errDialogueBuild( "You can't sell something you don't have!" );
+      land_errDialogueBuild( _("You can't sell something you don't have!") );
       failure = 1;
    }
 
@@ -713,8 +725,9 @@ static void outfits_sell( unsigned int wid, char* str )
    char *outfitname;
    Outfit* outfit;
    int q;
+   HookParam hparam[3];
 
-   outfitname  = toolkit_getImageArray( wid, OUTFITS_IAR );
+   outfitname = strdup(toolkit_getImageArray( wid, OUTFITS_IAR ));
    if (strcmp(outfitname, "None") == 0)
       return;
 
@@ -728,6 +741,15 @@ static void outfits_sell( unsigned int wid, char* str )
 
    player_modCredits( outfit->price * player_rmOutfit( outfit, q ) );
    outfits_updateEquipmentOutfits();
+   hparam[0].type    = HOOK_PARAM_STRING;
+   hparam[0].u.str   = outfitname;
+   hparam[1].type    = HOOK_PARAM_NUMBER;
+   hparam[1].u.num   = q;
+   hparam[2].type    = HOOK_PARAM_SENTINEL;
+   hooks_runParam( "outfit_sell", hparam );
+   if (land_takeoff)
+      takeoff(1);
+  free(outfitname);
 }
 /**
  * @brief Gets the current modifier status.

@@ -40,6 +40,8 @@ static int nerrcopy = 0; /* Number of bytes written to errcopy. */
 /**< Output filenames for stdout and stderr. */
 static char *outfile = NULL;
 static char *errfile = NULL;
+static char *outfiledouble = NULL;
+static char *errfiledouble = NULL;
 
 /* Whether to copy stdout and stderr to temporary buffers. */
 int copying = 0;
@@ -53,29 +55,41 @@ static void log_append( FILE *stream, char *str );
 /**
  * @brief Like fprintf but also prints to the naev console.
  */
-int logprintf( FILE *stream, const char *fmt, ... )
+int logprintf( FILE *stream, int newline, const char *fmt, ... )
 {
    va_list ap;
    char buf[2048];
+   size_t n;
 
    if (fmt == NULL)
       return 0;
    else { /* get the message */
+      /* Add header if necessary. */
+      /* Print variable text. */
       va_start( ap, fmt );
-      vsnprintf( &buf[2], sizeof(buf)-2, fmt, ap );
+      n = vsnprintf( &buf[2], sizeof(buf)-3-n, fmt, ap )-1;
       va_end( ap );
+
    }
 
 #ifndef NOLOGPRINTFCONSOLE
    /* Add to console. */
    if (stream == stderr) {
-      buf[0] = '\e';
+      buf[0] = '\a';
       buf[1] = 'r';
       cli_addMessage( buf );
    }
    else
       cli_addMessage( &buf[2] );
 #endif /* NOLOGPRINTFCONSOLE */
+
+   /* Finally add newline if necessary. */
+   if (newline) {
+      buf[2+n+1] = '\n';
+      buf[2+n+2] = '\0';
+   }
+   else
+      buf[2+n+1] = '\0';
 
    /* Append to buffer. */
    if (copying)
@@ -110,14 +124,17 @@ void log_redirect (void)
 
    outfile = malloc(PATH_MAX);
    errfile = malloc(PATH_MAX);
+   outfiledouble = malloc(PATH_MAX);
+   errfiledouble = malloc(PATH_MAX);
 
-   nsnprintf( outfile, PATH_MAX, "%slogs/%s_stdout.txt", nfile_dataPath(),
-         timestr );
+   nsnprintf( outfile, PATH_MAX, "%slogs/stdout.txt", nfile_dataPath() );
    freopen( outfile, "w", stdout );
 
-   nsnprintf( errfile, PATH_MAX, "%slogs/%s_stderr.txt", nfile_dataPath(),
-         timestr );
+   nsnprintf( errfile, PATH_MAX, "%slogs/stderr.txt", nfile_dataPath() );
    freopen( errfile, "w", stderr );
+
+   nsnprintf( outfiledouble, PATH_MAX, "%slogs/%s_stdout.txt", nfile_dataPath(), timestr );
+   nsnprintf( errfiledouble, PATH_MAX, "%slogs/%s_stderr.txt", nfile_dataPath(), timestr );
 
    /* stderr should be unbuffered */
    setvbuf( stderr, NULL, _IONBF, 0 );
@@ -249,6 +266,9 @@ void log_clean (void)
    if (err.st_size == 0) {
       unlink(outfile);
       unlink(errfile);
+   } else {
+      nfile_copyIfExists(outfile, outfiledouble);
+      nfile_copyIfExists(errfile, errfiledouble);
    }
 }
 
@@ -289,6 +309,6 @@ static void log_append( FILE *stream, char *str )
 
 copy_err:
    log_purge();
-   WARN("An error occurred while buffering %s!",
+   WARN(_("An error occurred while buffering %s!"),
       stream == stdout ? "stdout" : "stderr");
 }

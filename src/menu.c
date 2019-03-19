@@ -41,6 +41,7 @@
 #include "comm.h"
 #include "conf.h"
 #include "dev_uniedit.h"
+#include "dev_mapedit.h"
 #include "gui.h"
 #include "start.h"
 #include "camera.h"
@@ -62,6 +63,8 @@
 
 #define BUTTON_WIDTH    90 /**< Button width, standard across menus. */
 #define BUTTON_HEIGHT   30 /**< Button height, standard across menus. */
+
+#define EDITORS_EXTRA_WIDTH  60 /**< Editors menu extra width. */
 
 #define menu_Open(f)    (menu_open |= (f)) /**< Marks a menu as opened. */
 #define menu_Close(f)   (menu_open &= ~(f)) /**< Marks a menu as closed. */
@@ -94,6 +97,11 @@ static void menu_death_continue( unsigned int wid, char* str );
 static void menu_death_restart( unsigned int wid, char* str );
 static void menu_death_main( unsigned int wid, char* str );
 static void menu_death_close( unsigned int wid, char* str );
+/* editors menu */
+/* - Universe Editor */
+/* - Back to Main Menu */
+static void menu_editors_open( unsigned int wid_unused, char *unused );
+static void menu_editors_close( unsigned int wid, char* str );
 /* options button. */
 static void menu_options_button( unsigned int wid, char *str );
 
@@ -139,6 +147,7 @@ static int menu_main_bkg_system (void)
    cam_setTargetPos( cx, cy, 0 );
    cam_setZoom( conf.zoom_far );
    pause_setSpeed( 1. );
+   sound_setSpeed( 1. );
 
    return 0;
 }
@@ -155,7 +164,7 @@ void menu_main (void)
    int h, y;
 
    if (menu_isOpen(MENU_MAIN)) {
-      WARN("Menu main is already open.");
+      WARN( _("Menu main is already open.") );
       return;
    }
 
@@ -205,27 +214,27 @@ void menu_main (void)
 
    /* Buttons. */
    window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnLoad", "Load Game", menu_main_load, SDLK_l );
+         "btnLoad", _("Load Game"), menu_main_load, SDLK_l );
    y -= BUTTON_HEIGHT+20;
    window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnNew", "New Game", menu_main_new, SDLK_n );
+         "btnNew", _("New Game"), menu_main_new, SDLK_n );
    y -= BUTTON_HEIGHT+20;
    window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnTutorial", "Tutorial", menu_main_tutorial, SDLK_t );
+         "btnTutorial", _("Tutorial"), menu_main_tutorial, SDLK_t );
    y -= BUTTON_HEIGHT+20;
    if (conf.devmode) {
       window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-            "btnEditor", "Editor", uniedit_open, SDLK_e );
+            "btnEditor", _("Editors"), menu_editors_open, SDLK_e );
       y -= BUTTON_HEIGHT+20;
    }
    window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnOptions", "Options", menu_options_button, SDLK_o );
+         "btnOptions", _("Options"), menu_options_button, SDLK_o );
    y -= BUTTON_HEIGHT+20;
    window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnCredits", "Credits", menu_main_credits, SDLK_c );
+         "btnCredits", _("Credits"), menu_main_credits, SDLK_c );
    y -= BUTTON_HEIGHT+20;
    window_addButtonKey( wid, 20, y, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnExit", "Exit", menu_exit, SDLK_x );
+         "btnExit", _("Exit"), menu_exit, SDLK_x );
 
    /* Disable load button if there are no saves. */
    if (!save_hasSave())
@@ -309,7 +318,7 @@ void menu_main_close (void)
    if (window_exists("Main Menu"))
       window_destroy( window_get("Main Menu") );
    else
-      WARN("Main menu does not exist.");
+      WARN( _("Main menu does not exist.") );
 
    menu_Close(MENU_MAIN);
    pause_game();
@@ -428,15 +437,15 @@ void menu_small (void)
 
    window_addButtonKey( wid, 20, 20 + BUTTON_HEIGHT*3 + 20*3,
          BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnResume", "Resume", menu_small_close, SDLK_r );
+         "btnResume", _("Resume"), menu_small_close, SDLK_r );
    window_addButtonKey( wid, 20, 20 + BUTTON_HEIGHT*2 + 20*2,
          BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnInfo", "Info", menu_small_info, SDLK_i );
+         "btnInfo", _("Info"), menu_small_info, SDLK_i );
    window_addButtonKey( wid, 20, 20 + BUTTON_HEIGHT + 20,
          BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnOptions", "Options", menu_options_button, SDLK_o );
+         "btnOptions", _("Options"), menu_options_button, SDLK_o );
    window_addButtonKey( wid, 20, 20, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnExit", "Exit", menu_small_exit, SDLK_x );
+         "btnExit", _("Exit"), menu_small_exit, SDLK_x );
 
    menu_Open(MENU_SMALL);
 }
@@ -496,7 +505,7 @@ static void menu_small_exit( unsigned int wid, char* str )
    }
 
    /* Stop player sounds because sometimes they hang. */
-   player_restoreControl( 0, "Exited game." );
+   player_restoreControl( 0, _("Exited game.") );
    player_soundStop();
 
    /* Clean up. */
@@ -566,16 +575,16 @@ void menu_death (void)
    nsnprintf(path, PATH_MAX, "%ssaves/%s.ns", nfile_dataPath(), player.name);
    if (!player_isTut() && nfile_fileExists(path))
       window_addButtonKey( wid, 20, 20 + BUTTON_HEIGHT*2 + 20*2, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnContinue", "Continue", menu_death_continue, SDLK_c );
+         "btnContinue", _("Continue"), menu_death_continue, SDLK_c );
    else
       window_addButtonKey( wid, 20, 20 + BUTTON_HEIGHT*2 + 20*2, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnRestart", "Restart", menu_death_restart, SDLK_r );
+         "btnRestart", _("Restart"), menu_death_restart, SDLK_r );
 
    window_addButtonKey( wid, 20, 20 + (BUTTON_HEIGHT+20),
          BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnMain", "Main Menu", menu_death_main, SDLK_m );
+         "btnMain", _("Main Menu"), menu_death_main, SDLK_m );
    window_addButtonKey( wid, 20, 20, BUTTON_WIDTH, BUTTON_HEIGHT,
-         "btnExit", "Exit Game", menu_exit, SDLK_x );
+         "btnExit", _("Exit Game"), menu_exit, SDLK_x );
    menu_Open(MENU_DEATH);
 
    /* Makes it all look cooler since everything still goes on. */
@@ -630,7 +639,7 @@ int menu_askQuit (void)
 
    /* Ask if should quit. */
    menu_Open( MENU_ASKQUIT );
-   if (dialogue_YesNoRaw( "Quit Naev", "Are you sure you want to quit Naev?" )) {
+   if (dialogue_YesNoRaw( _("Quit Naev"), _("Are you sure you want to quit Naev?") )) {
       exit_game();
       return 1;
    }
@@ -639,3 +648,67 @@ int menu_askQuit (void)
    return 0;
 }
 
+/**
+ * @brief Provisional Menu for when there will be multiple editors
+ */
+static void menu_editors_open( unsigned int wid, char *unused )
+{
+   (void) unused;
+   int h, y;
+
+   /*WARN("Entering function.");*/
+
+   /* Menu already open, quit. */
+   if (menu_isOpen( MENU_EDITORS )) {
+      return;
+   }
+
+   /* Close the Main Menu */
+   menu_main_close();
+   unpause_game();
+
+   /* Set dimensions */
+   y  = 20 + (BUTTON_HEIGHT+20)*2;
+   h  = y + 80;
+
+   wid = window_create( "Editors", -1, -1, MENU_WIDTH + EDITORS_EXTRA_WIDTH, h );
+   window_setCancel( wid, menu_editors_close );
+
+   /* Set buttons for the editors */
+   window_addButtonKey( wid, 20, y, BUTTON_WIDTH + EDITORS_EXTRA_WIDTH, BUTTON_HEIGHT,
+      "btnUniverse", "Universe Map", uniedit_open, SDLK_u );
+   y -= BUTTON_HEIGHT+20;
+   window_addButtonKey( wid, 20, y, BUTTON_WIDTH + EDITORS_EXTRA_WIDTH, BUTTON_HEIGHT,
+      "btnMapEdit", "Map Outfits", mapedit_open, SDLK_m );
+   y -= BUTTON_HEIGHT+20;
+   window_addButtonKey( wid, 20, y, BUTTON_WIDTH + EDITORS_EXTRA_WIDTH, BUTTON_HEIGHT,
+      "btnMain", "Exit to Main Menu", menu_editors_close, SDLK_x );
+
+    /* Editors menu is open. */
+   menu_Open( MENU_EDITORS );
+
+   /*WARN("Exiting function.");*/
+
+   return;
+}
+
+/**
+ * @brief Closes the editors menu.
+ *    @param str Unused.
+ */
+static void menu_editors_close( unsigned int wid, char* str )
+{
+   (void)str;
+   
+   /* Close the Editors Menu and mark it as closed */
+   /*WARN("Entering function.");*/
+   window_destroy( wid );
+   menu_Close( MENU_EDITORS );
+   
+   /* Restores Main Menu */
+   /*WARN("Restoring Main Menu.");*/
+   menu_main();
+   /*WARN("Exiting function.");*/
+   
+   return;
+}
